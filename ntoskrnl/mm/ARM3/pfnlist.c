@@ -1004,6 +1004,10 @@ MiInitializePfn(IN PFN_NUMBER PageFrameIndex,
     Pfn1->u3.e2.ReferenceCount = 1;
     Pfn1->u2.ShareCount = 1;
     Pfn1->u3.e1.PageLocation = ActiveAndValid;
+    /* This is regular cached memory. Free pages are initialized as non-cached,
+     * which would otherwise make MiFlushTbAndCapture (NtProtectVirtualMemory)
+     * rebuild the PTE as uncached. */
+    Pfn1->u3.e1.CacheAttribute = MiCached;
     ASSERT(Pfn1->u3.e1.Rom == 0);
     Pfn1->u3.e1.Modified = Modified;
 
@@ -1062,6 +1066,7 @@ MiInitializePfnAndMakePteValid(IN PFN_NUMBER PageFrameIndex,
     Pfn1->u3.e2.ReferenceCount++;
     Pfn1->u2.ShareCount++;
     Pfn1->u3.e1.PageLocation = ActiveAndValid;
+    Pfn1->u3.e1.CacheAttribute = TempPte.u.Hard.CacheDisable ? MiNonCached : MiCached;
     ASSERT(Pfn1->u3.e1.Rom == 0);
     Pfn1->u3.e1.Modified = 1;
 
@@ -1318,6 +1323,7 @@ MiInitializePfnForOtherProcess(IN PFN_NUMBER PageFrameIndex,
     Pfn1->u3.e2.ReferenceCount = 1;
     Pfn1->u2.ShareCount = 1;
     Pfn1->u3.e1.PageLocation = ActiveAndValid;
+    Pfn1->u3.e1.CacheAttribute = MiCached;
     Pfn1->u3.e1.Modified = TRUE;
     Pfn1->u4.InPageError = FALSE;
 
