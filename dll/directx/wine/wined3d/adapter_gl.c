@@ -3411,6 +3411,56 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter_gl *adapter_gl,
 
     load_gl_funcs(gl_info);
 
+#ifdef __REACTOS__
+    {
+        /* Some OpenGL implementations (e.g. the built-in software renderer)
+         * report a GL version without exposing the matching core entry points
+         * through wglGetProcAddress. Promoting extensions from such a version
+         * makes us call through NULL pointers, so clamp the version to what
+         * is actually callable. */
+        static const struct
+        {
+            DWORD version;
+            const char *name;
+            size_t offset;
+        }
+        core_checks[] =
+        {
+            {MAKEDWORD_VERSION(1, 2), "glTexImage3D",   offsetof(struct opengl_funcs, ext.p_glTexImage3D)},
+            {MAKEDWORD_VERSION(1, 3), "glActiveTexture", offsetof(struct opengl_funcs, ext.p_glActiveTexture)},
+            {MAKEDWORD_VERSION(1, 4), "glBlendColor",   offsetof(struct opengl_funcs, ext.p_glBlendColor)},
+            {MAKEDWORD_VERSION(1, 5), "glGetQueryiv",   offsetof(struct opengl_funcs, ext.p_glGetQueryiv)},
+            {MAKEDWORD_VERSION(1, 5), "glBindBuffer",   offsetof(struct opengl_funcs, ext.p_glBindBuffer)},
+            {MAKEDWORD_VERSION(2, 0), "glCreateShader", offsetof(struct opengl_funcs, ext.p_glCreateShader)},
+        };
+
+        for (i = 0; i < ARRAY_SIZE(core_checks); ++i)
+        {
+            if (gl_version < core_checks[i].version)
+                break;
+            if (!*(void **)((BYTE *)&gl_info->gl_ops + core_checks[i].offset))
+            {
+                DWORD clamped = MAKEDWORD_VERSION(1, 1);
+
+                for (j = i; j > 0; --j)
+                {
+                    if (core_checks[j - 1].version < core_checks[i].version)
+                    {
+                        clamped = core_checks[j - 1].version;
+                        break;
+                    }
+                }
+
+                WARN("GL_VERSION %u.%u reported, but %s is not available; treating as GL %u.%u.\n",
+                        gl_version >> 16, gl_version & 0xffff, core_checks[i].name,
+                        clamped >> 16, clamped & 0xffff);
+                gl_version = clamped;
+                break;
+            }
+        }
+    }
+#endif
+
     memset(gl_info->supported, 0, sizeof(gl_info->supported));
     gl_info->supported[WINED3D_GL_EXT_NONE] = TRUE;
 

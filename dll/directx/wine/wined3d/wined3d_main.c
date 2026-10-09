@@ -290,10 +290,11 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
     }
     context_set_tls_idx(wined3d_context_tls_idx);
 
-    /* We need our own window class for a fake window which we use to retrieve GL capabilities */
-    /* We might need CS_OWNDC in the future if we notice strange things on Windows.
-     * Various articles/posts about OpenGL problems on Windows recommend this. */
-    wc.style                = CS_HREDRAW | CS_VREDRAW;
+    /* We need our own window class for a fake window which we use to retrieve GL capabilities.
+     * OpenGL caps probing on Windows is sensitive to shared DC state, and the fake window must
+     * own its own device context to avoid crashes in games that trigger fallback GL initialization.
+     */
+    wc.style                = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
     wc.lpfnWndProc          = DefWindowProcA;
     wc.cbClsExtra           = 0;
     wc.cbWndExtra           = 0;
