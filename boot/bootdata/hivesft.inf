@@ -714,6 +714,15 @@ HKLM,"SOFTWARE\Microsoft\Windows NT\CurrentVersion\MCI Extensions","wmv",0x00000
 HKLM,"SOFTWARE\Microsoft\Windows NT\CurrentVersion\MCI Extensions","wmx",0x00000002,"MPEGVideo"
 HKLM,"SOFTWARE\Microsoft\Windows NT\CurrentVersion\MCI Extensions","wvx",0x00000002,"MPEGVideo"
 
+; Mesa3D (llvmpipe) software OpenGL ICD, shipped as an optional module (mesa32.dll).
+; opengl32 uses it when the display driver has no OpenGL ICD of its own, so that
+; wined3d (Direct3D) gets a GLSL capable implementation. Ignored if mesa32.dll is absent.
+HKLM,"SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\Mesa3D","Dll",0x00000000,"mesa32"
+HKLM,"SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\Mesa3D","Version",0x00010001,0x00000002
+HKLM,"SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\Mesa3D","DriverVersion",0x00010001,0x00000001
+HKLM,"SOFTWARE\Microsoft\Windows NT\CurrentVersion\OpenGLDrivers\Mesa3D","Flags",0x00010001,0x00000001
+HKLM,"SOFTWARE\ReactOS\OpenGL","SoftwareFallbackICD",0x00000000,"Mesa3D"
+
 ; User Profile List
 HKLM,"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList",,0x00000012
 HKLM,"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList","ProfilesDirectory",0x00020000,"%SystemDrive%\Documents and Settings"

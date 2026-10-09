@@ -37,6 +37,73 @@ static const WCHAR OpenGLDrivers_Key[] = L"SOFTWARE\\Microsoft\\Windows NT\\Curr
 static const WCHAR CustomDrivers_Key[] = L"SOFTWARE\\ReactOS\\OpenGL";
 static Drv_Opengl_Info CustomDrvInfo;
 static CUSTOM_DRIVER_STATE CustomDriverState = OGL_CD_NOT_QUERIED;
+static Drv_Opengl_Info FallbackDrvInfo;
+static BOOL FallbackDriverQueried = FALSE, FallbackDriverPresent = FALSE;
+
+/* Fill the version info of an ICD registered under the OpenGLDrivers key */
+static BOOL IntQueryRegisteredIcd(pDrv_Opengl_Info DrvInfo)
+{
+    HKEY OglKey, DrvKey;
+    DWORD dwInput, dwValueType;
+    LONG ret;
+
+    ret = RegOpenKeyExW(HKEY_LOCAL_MACHINE, OpenGLDrivers_Key, 0, KEY_READ, &OglKey);
+    if (ret != ERROR_SUCCESS)
+        return FALSE;
+
+    ret = RegOpenKeyExW(OglKey, DrvInfo->DriverName, 0, KEY_READ, &DrvKey);
+    RegCloseKey(OglKey);
+    if (ret != ERROR_SUCCESS)
+        return FALSE;
+
+    dwInput = sizeof(DrvInfo->Version);
+    ret = RegQueryValueExW(DrvKey, L"Version", 0, &dwValueType, (LPBYTE)&DrvInfo->Version, &dwInput);
+    if ((ret != ERROR_SUCCESS) || (dwValueType != REG_DWORD))
+        DrvInfo->Version = 0;
+
+    dwInput = sizeof(DrvInfo->DriverVersion);
+    ret = RegQueryValueExW(DrvKey, L"DriverVersion", 0, &dwValueType, (LPBYTE)&DrvInfo->DriverVersion, &dwInput);
+    if ((ret != ERROR_SUCCESS) || (dwValueType != REG_DWORD))
+        DrvInfo->DriverVersion = 0;
+
+    RegCloseKey(DrvKey);
+    return TRUE;
+}
+
+/* The following code is ReactOS specific: when the display driver does not provide
+ * an OpenGL ICD, a software ICD registered under HKLM\Software\ReactOS\OpenGL
+ * ("SoftwareFallbackICD") is used instead of the built-in software implementation.
+ * This gives e.g. wined3d a GLSL capable implementation (Mesa llvmpipe) on VBE/VGA. */
+static pDrv_Opengl_Info IntGetFallbackIcdInfo(void)
+{
+    HKEY Key;
+    DWORD dwInput, dwValueType;
+    LONG ret;
+
+    if (FallbackDriverQueried)
+        return FallbackDriverPresent ? &FallbackDrvInfo : NULL;
+
+    FallbackDriverQueried = TRUE;
+    ret = RegOpenKeyExW(HKEY_LOCAL_MACHINE, CustomDrivers_Key, 0, KEY_READ, &Key);
+    if (ret != ERROR_SUCCESS)
+        return NULL;
+
+    dwInput = sizeof(FallbackDrvInfo.DriverName) - sizeof(WCHAR);
+    ret = RegQueryValueExW(Key, L"SoftwareFallbackICD", 0, &dwValueType, (LPBYTE)FallbackDrvInfo.DriverName, &dwInput);
+    RegCloseKey(Key);
+    if ((ret != ERROR_SUCCESS) || (dwValueType != REG_SZ) || !FallbackDrvInfo.DriverName[0])
+        return NULL;
+
+    if (!IntQueryRegisteredIcd(&FallbackDrvInfo))
+    {
+        WARN("Fallback ICD %S is not registered\n", FallbackDrvInfo.DriverName);
+        return NULL;
+    }
+
+    TRACE("Using %S as software fallback ICD\n", FallbackDrvInfo.DriverName);
+    FallbackDriverPresent = TRUE;
+    return &FallbackDrvInfo;
+}
 
 static void APIENTRY wglSetCurrentValue(PVOID value)
 {
@@ -142,21 +209,27 @@ custom_end:
         dwInput = OPENGL_GETINFO;
         ret = ExtEscape(hdc, QUERYESCSUPPORT, sizeof(DWORD), (LPCSTR)&dwInput, 0, NULL);
 
-        /* Driver doesn't support opengl */
-        if(ret <= 0)
-            return NULL;
-
-        /* Query for the ICD DLL name and version */
-        dwInput = OPENGL_GETINFO_DRVNAME;
-        ret = ExtEscape(hdc, OPENGL_GETINFO, sizeof(DWORD), (LPCSTR)&dwInput, sizeof(DrvInfo), (LPSTR)&DrvInfo);
-
         if(ret <= 0)
         {
-            ERR("Driver claims to support OPENGL_GETINFO escape code, but doesn't. ret: %X\n", ret);
-            return NULL;
+            /* Driver doesn't support opengl, use the software fallback ICD if there is one */
+            pDrvInfo = IntGetFallbackIcdInfo();
+            if (!pDrvInfo)
+                return NULL;
         }
+        else
+        {
+            /* Query for the ICD DLL name and version */
+            dwInput = OPENGL_GETINFO_DRVNAME;
+            ret = ExtEscape(hdc, OPENGL_GETINFO, sizeof(DWORD), (LPCSTR)&dwInput, sizeof(DrvInfo), (LPSTR)&DrvInfo);
 
-        pDrvInfo = &DrvInfo;
+            if(ret <= 0)
+            {
+                ERR("Driver claims to support OPENGL_GETINFO escape code, but doesn't. ret: %X\n", ret);
+                return NULL;
+            }
+
+            pDrvInfo = &DrvInfo;
+        }
     }
 
     /* Protect the list while we are loading*/
