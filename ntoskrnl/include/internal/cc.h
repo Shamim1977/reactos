@@ -237,6 +237,7 @@ typedef struct _INTERNAL_BCB
     ULONG PinCount;
     CSHORT RefCount; /* (At offset 0x34 on WinNT4) */
     LIST_ENTRY BcbEntry;
+    BOOLEAN Dirty; /* CcSetDirtyPinnedData was called on this BCB */
 } INTERNAL_BCB, *PINTERNAL_BCB;
 
 typedef struct _LAZY_WRITER

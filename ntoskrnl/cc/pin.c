@@ -69,6 +69,45 @@ CcpFindBcb(
 
 static
 VOID
+CcpMarkBcbDirty(
+    IN PINTERNAL_BCB Bcb)
+{
+    PROS_VACB Vacb = Bcb->Vacb;
+
+    /* Tell Mm */
+    MmMakeSegmentDirty(Vacb->SharedCacheMap->FileObject->SectionObjectPointer,
+                       Bcb->PFCB.MappedFileOffset.QuadPart,
+                       Bcb->PFCB.MappedLength);
+
+    if (!Vacb->Dirty)
+    {
+        CcRosMarkDirtyVacb(Vacb);
+    }
+}
+
+/*
+ * File systems are allowed to call CcSetDirtyPinnedData before they actually
+ * modify the pinned data (e.g. fastfat's FatPrepareWriteVolumeFile marks the
+ * BCB dirty first, then updates the FAT entries). Mm only tracks dirtiness of
+ * the section pages, not of the PTEs mapping them, so if the lazy writer
+ * flushes the range in between, the later modifications would be silently
+ * dropped (CORE-17172: truncated cluster chains after copying large files).
+ * Re-mark the range dirty when such a BCB is released so the final contents
+ * always reach the disk.
+ */
+static
+VOID
+CcpRedirtyBcbOnRelease(
+    IN PINTERNAL_BCB Bcb)
+{
+    if (Bcb->Dirty)
+    {
+        CcpMarkBcbDirty(Bcb);
+    }
+}
+
+static
+VOID
 CcpDereferenceBcb(
     IN PROS_SHARED_CACHE_MAP SharedCacheMap,
     IN PINTERNAL_BCB Bcb)
@@ -551,19 +590,11 @@ CcSetDirtyPinnedData (
     IN PLARGE_INTEGER Lsn)
 {
     PINTERNAL_BCB iBcb = CONTAINING_RECORD(Bcb, INTERNAL_BCB, PFCB);
-    PROS_VACB Vacb = iBcb->Vacb;
 
     CCTRACE(CC_API_DEBUG, "Bcb=%p Lsn=%p\n", Bcb, Lsn);
 
-    /* Tell Mm */
-    MmMakeSegmentDirty(Vacb->SharedCacheMap->FileObject->SectionObjectPointer,
-                       iBcb->PFCB.MappedFileOffset.QuadPart,
-                       iBcb->PFCB.MappedLength);
-
-    if (!Vacb->Dirty)
-    {
-        CcRosMarkDirtyVacb(Vacb);
-    }
+    iBcb->Dirty = TRUE;
+    CcpMarkBcbDirty(iBcb);
 }
 
 
@@ -591,6 +622,8 @@ CcUnpinDataForThread (
     PINTERNAL_BCB iBcb = CONTAINING_RECORD(Bcb, INTERNAL_BCB, PFCB);
 
     CCTRACE(CC_API_DEBUG, "Bcb=%p ResourceThreadId=%lu\n", Bcb, ResourceThreadId);
+
+    CcpRedirtyBcbOnRelease(iBcb);
 
     if (iBcb->PinCount != 0)
     {
@@ -634,6 +667,9 @@ CcUnpinRepinnedBcb (
 
     SharedCacheMap = iBcb->Vacb->SharedCacheMap;
     IoStatus->Status = STATUS_SUCCESS;
+
+    /* Before a possible write-through, so that it writes the final data */
+    CcpRedirtyBcbOnRelease(iBcb);
 
     if (WriteThrough)
     {
