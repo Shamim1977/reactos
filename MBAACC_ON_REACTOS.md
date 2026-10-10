@@ -39,6 +39,7 @@ Base revision: `f06eace89e1` (ReactOS `0.4.17-dev-966`, master as of October 202
 | Game data (263 MB `0000.p`) after a reboot | Corrupt; kernel `STATUS_FILE_CORRUPT_ERROR`; assertion in Debug builds | Intact (verified byte for byte) |
 | Rendering speed with software OpenGL | ~0.07 fps (one frame every ~15 s) | 10–30 fps (single vCPU, Debug build) |
 | Battle | Unreachable | Playable; sprites, stages, HUD and effects render correctly |
+| Japanese text (launcher, menus) | `?????` and mojibake | Correct, after installing a CJK font and code page 932 ([6.4](#64-japanese-text-cjk-font-and-code-page-932)) |
 
 Four independent problems stopped the game:
 
@@ -417,7 +418,8 @@ The `2` destination means `system32`. Optional files are silently skipped when a
    copy "extracted\$SYSDIR\mesa32.dll" <source>\modules\optional\mesa32.dll
    ```
    SHA-1 of the extracted `mesa32.dll`: `3bb7e66ad3762cd6aee62433c38be5ed9d7f09ea`.
-3. Rebuild `bootcd`.
+3. Optional, for Japanese text: also put `DroidSansFallback.ttf` and `NOTICE_for_Droid_Font.txt` in `modules\optional` (see [6.4](#64-japanese-text-cjk-font-and-code-page-932)).
+4. Rebuild `bootcd`.
 
 **Alternative on an existing installation:** install "Mesa3D Graphics Library" from the Applications Manager (RAPPS) and select it as the OpenGL driver. That's equivalent, but needs network access and per-user setup.
 
@@ -434,7 +436,34 @@ The `2` destination means `system32`. Optional files are silently skipped when a
 ### 6.3 Game-side notes
 
 - **Keys:** `C` confirms (Start/A on the default keyboard layout); arrow keys move.
-- The launcher dialog and in-game Japanese text show as `???` or mojibake unless the system locale is Japanese. The same happens on non-Japanese Windows. See [10](#10-known-remaining-issues).
+- **Copying the game:** copy it from a CD/ISO image to the disk (for example `xcopy /e /i /y D:\MBAACC107TrialRev10 C:\MBAACC`). VMware shared folders don't work, because ReactOS has no VMware HGFS driver.
+- **Live CD:** the game does not run from the Live CD. The live image doesn't include `mesa32.dll` (optional files only go into the setup cabinet), so install to disk.
+
+### 6.4 Japanese text: CJK font and code page 932
+
+**Symptom:** the launcher shows `?????` for its labels and buttons, the window title is mojibake (`<N"@ƒ□ƒjƒ…□[`), and the in-game *Information* box shows garbage such as `Xg[Š[É^ÁÄbotŠèÉí¤,[hÅ·B`.
+
+**Cause:** two separate gaps, both of which also exist on non-Japanese Windows:
+
+1. **No font with Japanese characters.** ReactOS's CJK font support is the *optional* file `DroidSansFallback.ttf`. The registry already references it (`hivesys.inf`: `FontAssoc\Associated DefaultFonts\AssocSystemFont = DroidSansFallback.ttf`), but the file is only on official builds, whose build servers place it in `modules/optional`. Local builds don't have it.
+2. **Wrong code page for non-Unicode programs.** MBAACC passes Shift-JIS strings to ANSI APIs (`SetWindowTextA`, `GetGlyphOutlineA`, `D3DXCreateFontA`). With the default ANSI code page 1252, those bytes are decoded as Western characters. Code page 932 itself is fully supported (`c_932.nls` and its registry entries ship with ReactOS); it just isn't selected.
+
+**Fix on an existing installation:** [`mbaacc/install-japanese.cmd`](mbaacc/install-japanese.cmd). Put it on a CD or ISO next to `DroidSansFallback.ttf`, run it in ReactOS, then restart. The script:
+
+| Step | Registry / file |
+|---|---|
+| Copy the font | `DroidSansFallback.ttf` → `%SystemRoot%\Fonts` |
+| Register it | `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts` → `"Droid Sans Fallback (TrueType)" = "DroidSansFallback.ttf"` |
+| Map Japanese font names to it | `...\FontSubstitutes` → `MS Gothic`, `MS PGothic`, `MS UI Gothic`, `MS Mincho`, `MS PMincho` = `"Droid Sans Fallback"` |
+| Select code page 932 | `HKLM\SYSTEM\CurrentControlSet\Control\Nls\CodePage` → `ACP = 932`, `OEMCP = 932`, `MACCP = 10001` |
+
+`DroidSansFallback.ttf` (Apache-2.0) and its notice come from ReactOS's optional-files server: <https://svn.reactos.org/optional/DroidSansFallback.ttf> and <https://svn.reactos.org/optional/NOTICE_for_Droid_Font.txt>.
+
+**Fix at build time:** place `DroidSansFallback.ttf` and `NOTICE_for_Droid_Font.txt` in `modules/optional` (section [6.1](#61-the-mesa-icd-binary-not-in-git)) and the font ships on the ISO. The code page still has to be set after installation, either with the script or in Control Panel → Regional and Language Options → Advanced → *Language for non-Unicode programs* = Japanese.
+
+**Result (verified):** after a restart the launcher reads 起動メニュー, 画面サイズ, フルスクリーンモードで起動 and キャンセル. The last character of the checkbox label is clipped slightly, because Droid Sans Fallback is a little wider than MS Gothic.
+
+**Side effect:** with code page 932 the backslash shows as `¥` in some places, the same as on Japanese Windows.
 
 ---
 
@@ -533,7 +562,9 @@ Clean-install check of the final ISO: unattended install → first logon (the ga
 | SMP kernel hangs at boot | `ntkrnlmp.exe` + `halmacpi.dll` stop right after the ARC paths are printed (1, 2 and 4 vCPUs) | Separate investigation |
 | Missing bloom/glow effect (`TecSakuraBloom`) | `D3DXCreateEffect` → vkd3d-shader 1.14 rejects the legacy FX syntax `texture = <targetTex0>;` inside `sampler_state` (`E5000: syntax error, unexpected '<'`). Even when parsed, vkd3d's fx_2 writer reports *"Writing fx_2_0 sampler objects initializers is not implemented"*. Upstream vkd3d has the same gap | Implement the angle-bracket state value in `hlsl.y` and fx_2 sampler-state output in `fx.c` |
 | Opening movie not shown, black title background | quartz: *"Failed to create filter for MPEG-I Stream Splitter / AVI Splitter / Wave Parser"* | An MPEG-1 splitter and decoder for ReactOS DirectShow |
-| Japanese text as `???` or mojibake (launcher, "Information" box) | Shift-JIS strings rendered with a Western ANSI code page | Japanese system locale (code page 932) and a CJK font, as on Windows |
+| **FAT32 corruption still possible on another path** | In a later test (game copied at first logon, restart about 2 minutes later), `0000.p` was corrupt again with a different pattern: the run of new clusters *was* on disk, but the junction entry linking the old end of the chain to it (written by `FatSetFatEntry`, 4-byte pin) was still end-of-chain. The fix in [5.4](#54-ntoscc-re-dirty-pinned-data-when-the-bcb-is-released) covers the pre-dirty/modify ordering but not this case | Under investigation. Workaround: if the game shows a black screen or a "file corrupt" error after a reboot, copy `0000.p` again |
+| `setup.exe` "Application Error" on the last page of interactive setup (*"Completing the ReactOS Setup Wizard"*; instruction and memory at the same bogus address, e.g. `0x68a67375`) | Not yet analysed; unattended installs skip this page and don't show it | The installation is already complete: click OK and restart |
+| Japanese text needs manual setup | The CJK font is optional and code page 932 is not the default | Fixed by [6.4](#64-japanese-text-cjk-font-and-code-page-932) (`mbaacc/install-japanese.cmd`) |
 | No sound | No ReactOS driver for VMware's default Ensoniq ES1371 | Another virtual sound device, or a driver |
 | MXCSR DAZ bit lost across context switches (`0x9fc0` → `0x9fb2`) | Kernel FPU state save/restore path | Separate investigation; measured not to be the cause of the slowdown |
 | Large allocations exhaust RAM | ARM3 cannot page out private memory | Implement it; meanwhile use ≥ 3 GB RAM |
